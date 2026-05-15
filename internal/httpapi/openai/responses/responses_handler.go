@@ -1,7 +1,6 @@
 package responses
 
 import (
-	"ds2api/internal/toolcall"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -14,7 +13,6 @@ import (
 	"ds2api/internal/assistantturn"
 	"ds2api/internal/auth"
 	"ds2api/internal/completionruntime"
-	"ds2api/internal/config"
 	dsprotocol "ds2api/internal/deepseek/protocol"
 	openaifmt "ds2api/internal/format/openai"
 	"ds2api/internal/promptcompat"
@@ -118,7 +116,7 @@ func (h *Handler) Responses(w http.ResponseWriter, r *http.Request) {
 		if historySession != nil {
 			historySession.SuccessTurn(http.StatusOK, result.Turn, assistantturn.OpenAIResponsesUsage(result.Turn))
 		}
-		responseObj := openaifmt.BuildResponseObjectWithToolCalls(responseID, stdReq.ResponseModel, result.Turn.Prompt, result.Turn.Thinking, result.Turn.Text, result.Turn.ToolCalls, stdReq.ToolsRaw)
+		responseObj := openaifmt.BuildResponseObjectWithToolCalls(responseID, stdReq.ResponseModel, result.Turn.Prompt, result.Turn.Thinking, result.Turn.Text, nil, nil)
 		responseObj["usage"] = assistantturn.OpenAIResponsesUsage(result.Turn)
 		h.getResponseStore().put(owner, responseID, responseObj)
 		writeJSON(w, http.StatusOK, responseObj)
@@ -138,10 +136,10 @@ func (h *Handler) Responses(w http.ResponseWriter, r *http.Request) {
 
 	streamReq := start.Request
 	refFileTokens := streamReq.RefFileTokens
-	h.handleResponsesStreamWithRetry(w, r, a, start.Response, start.Payload, start.Pow, owner, responseID, streamReq.ResponseModel, streamReq.PromptTokenText, refFileTokens, streamReq.Thinking, streamReq.Search, streamReq.ToolNames, streamReq.ToolsRaw, streamReq.ToolChoice, traceID, historySession)
+	h.handleResponsesStreamWithRetry(w, r, a, start.Response, start.Payload, start.Pow, owner, responseID, streamReq.ResponseModel, streamReq.PromptTokenText, refFileTokens, streamReq.Thinking, streamReq.Search, traceID, historySession)
 }
 
-func (h *Handler) handleResponsesNonStream(w http.ResponseWriter, resp *http.Response, owner, responseID, model, finalPrompt string, refFileTokens int, thinkingEnabled, searchEnabled bool, toolNames []string, toolsRaw any, toolChoice promptcompat.ToolChoicePolicy, traceID string) {
+func (h *Handler) handleResponsesNonStream(w http.ResponseWriter, resp *http.Response, owner, responseID, model, finalPrompt string, refFileTokens int, thinkingEnabled, searchEnabled bool, traceID string) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -155,24 +153,20 @@ func (h *Handler) handleResponsesNonStream(w http.ResponseWriter, resp *http.Res
 		Prompt:        finalPrompt,
 		RefFileTokens: refFileTokens,
 		SearchEnabled: searchEnabled,
-		ToolNames:     toolNames,
-		ToolsRaw:      toolsRaw,
-		ToolChoice:    toolChoice,
 	})
-	logResponsesToolPolicyRejection(traceID, toolChoice, turn.ParsedToolCalls, "text")
 	outcome := assistantturn.FinalizeTurn(turn, assistantturn.FinalizeOptions{})
 	if outcome.ShouldFail {
 		writeOpenAIErrorWithCode(w, outcome.Error.Status, outcome.Error.Message, outcome.Error.Code)
 		return
 	}
 
-	responseObj := openaifmt.BuildResponseObjectWithToolCalls(responseID, model, finalPrompt, turn.Thinking, turn.Text, turn.ToolCalls, toolsRaw)
+	responseObj := openaifmt.BuildResponseObjectWithToolCalls(responseID, model, finalPrompt, turn.Thinking, turn.Text, nil, nil)
 	responseObj["usage"] = assistantturn.OpenAIResponsesUsage(turn)
 	h.getResponseStore().put(owner, responseID, responseObj)
 	writeJSON(w, http.StatusOK, responseObj)
 }
 
-func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, resp *http.Response, owner, responseID, model, finalPrompt string, refFileTokens int, thinkingEnabled, searchEnabled bool, toolNames []string, toolsRaw any, toolChoice promptcompat.ToolChoicePolicy, traceID string) {
+func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, resp *http.Response, owner, responseID, model, finalPrompt string, refFileTokens int, thinkingEnabled, searchEnabled bool, traceID string) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -190,8 +184,6 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 	if thinkingEnabled {
 		initialType = "thinking"
 	}
-	bufferToolContent := len(toolNames) > 0
-	emitEarlyToolDeltas := h.toolcallFeatureMatchEnabled() && h.toolcallEarlyEmitHighConfidence()
 	stripReferenceMarkers := stripReferenceMarkersEnabled()
 
 	streamRuntime := newResponsesStreamRuntime(
@@ -204,11 +196,6 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 		thinkingEnabled,
 		searchEnabled,
 		stripReferenceMarkers,
-		toolNames,
-		toolsRaw,
-		bufferToolContent,
-		emitEarlyToolDeltas,
-		toolChoice,
 		traceID,
 		func(obj map[string]any) {
 			h.getResponseStore().put(owner, responseID, obj)
@@ -236,35 +223,4 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			streamRuntime.finalize("stop", false)
 		},
 	})
-}
-
-func logResponsesToolPolicyRejection(traceID string, policy promptcompat.ToolChoicePolicy, parsed toolcall.ToolCallParseResult, channel string) {
-	rejected := filteredRejectedToolNamesForLog(parsed.RejectedToolNames)
-	if !parsed.RejectedByPolicy || len(rejected) == 0 {
-		return
-	}
-	config.Logger.Warn(
-		"[responses] rejected tool calls by policy",
-		"trace_id", strings.TrimSpace(traceID),
-		"channel", channel,
-		"tool_choice_mode", policy.Mode,
-		"rejected_tool_names", strings.Join(rejected, ","),
-	)
-}
-
-func filteredRejectedToolNamesForLog(names []string) []string {
-	if len(names) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(names))
-	for _, name := range names {
-		trimmed := strings.TrimSpace(name)
-		switch strings.ToLower(trimmed) {
-		case "", "tool_name":
-			continue
-		default:
-			out = append(out, trimmed)
-		}
-	}
-	return out
 }

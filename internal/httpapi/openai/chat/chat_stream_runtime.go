@@ -8,10 +8,8 @@ import (
 	"ds2api/internal/assistantturn"
 	openaifmt "ds2api/internal/format/openai"
 	"ds2api/internal/httpapi/openai/shared"
-	"ds2api/internal/promptcompat"
 	"ds2api/internal/sse"
 	streamengine "ds2api/internal/stream"
-	"ds2api/internal/toolstream"
 )
 
 type chatStreamRuntime struct {
@@ -24,23 +22,15 @@ type chatStreamRuntime struct {
 	model         string
 	finalPrompt   string
 	refFileTokens int
-	toolNames     []string
-	toolsRaw      any
-	toolChoice    promptcompat.ToolChoicePolicy
 
 	thinkingEnabled       bool
 	searchEnabled         bool
 	stripReferenceMarkers bool
 
 	firstChunkSent       bool
-	bufferToolContent    bool
-	emitEarlyToolDeltas  bool
 	toolCallsEmitted     bool
 	toolCallsDoneEmitted bool
 
-	toolSieve         toolstream.State
-	streamToolCallIDs map[int]string
-	streamToolNames   map[int]string
 	accumulator       shared.StreamAccumulator
 	responseMessageID int
 
@@ -90,11 +80,6 @@ func newChatStreamRuntime(
 	thinkingEnabled bool,
 	searchEnabled bool,
 	stripReferenceMarkers bool,
-	toolNames []string,
-	toolsRaw any,
-	toolChoice promptcompat.ToolChoicePolicy,
-	bufferToolContent bool,
-	emitEarlyToolDeltas bool,
 ) *chatStreamRuntime {
 	return &chatStreamRuntime{
 		w:                     w,
@@ -104,16 +89,9 @@ func newChatStreamRuntime(
 		created:               created,
 		model:                 model,
 		finalPrompt:           finalPrompt,
-		toolNames:             toolNames,
-		toolsRaw:              toolsRaw,
-		toolChoice:            toolChoice,
 		thinkingEnabled:       thinkingEnabled,
 		searchEnabled:         searchEnabled,
 		stripReferenceMarkers: stripReferenceMarkers,
-		bufferToolContent:     bufferToolContent,
-		emitEarlyToolDeltas:   emitEarlyToolDeltas,
-		streamToolCallIDs:     map[int]string{},
-		streamToolNames:       map[int]string{},
 		accumulator: shared.StreamAccumulator{
 			ThinkingEnabled:       thinkingEnabled,
 			SearchEnabled:         searchEnabled,
@@ -207,11 +185,6 @@ func (s *chatStreamRuntime) historyThinking() string {
 	)
 }
 
-func (s *chatStreamRuntime) resetStreamToolCallState() {
-	s.streamToolCallIDs = map[int]string{}
-	s.streamToolNames = map[int]string{}
-}
-
 func (s *chatStreamRuntime) finalize(finishReason string, deferEmptyOutput bool) bool {
 	s.finalErrorStatus = 0
 	s.finalErrorMessage = ""
@@ -228,48 +201,15 @@ func (s *chatStreamRuntime) finalize(finishReason string, deferEmptyOutput bool)
 		ContentFilter:         finishReason == "content_filter",
 		ResponseMessageID:     s.responseMessageID,
 		AlreadyEmittedCalls:   s.toolCallsEmitted,
-		AlreadyEmittedToolRaw: s.toolCallsDoneEmitted,
 	}, assistantturn.BuildOptions{
 		Model:                 s.model,
 		Prompt:                s.finalPrompt,
 		RefFileTokens:         s.refFileTokens,
 		SearchEnabled:         s.searchEnabled,
 		StripReferenceMarkers: s.stripReferenceMarkers,
-		ToolNames:             s.toolNames,
-		ToolsRaw:              s.toolsRaw,
-		ToolChoice:            s.toolChoice,
 	})
 	s.finalThinking = turn.Thinking
 	s.finalText = turn.Text
-	if len(turn.ToolCalls) > 0 && !s.toolCallsDoneEmitted {
-		s.sendDelta(map[string]any{
-			"tool_calls": formatFinalStreamToolCallsWithStableIDs(turn.ToolCalls, s.streamToolCallIDs, s.toolsRaw),
-		})
-		s.toolCallsEmitted = true
-		s.toolCallsDoneEmitted = true
-	} else if s.bufferToolContent {
-		batch := chatDeltaBatch{runtime: s}
-		for _, evt := range toolstream.Flush(&s.toolSieve, s.toolNames) {
-			if len(evt.ToolCalls) > 0 {
-				batch.flush()
-				s.toolCallsEmitted = true
-				s.toolCallsDoneEmitted = true
-				s.sendDelta(map[string]any{
-					"tool_calls": formatFinalStreamToolCallsWithStableIDs(evt.ToolCalls, s.streamToolCallIDs, s.toolsRaw),
-				})
-				s.resetStreamToolCallState()
-			}
-			if evt.Content == "" {
-				continue
-			}
-			cleaned := cleanVisibleOutput(evt.Content, s.stripReferenceMarkers)
-			if cleaned == "" || (s.searchEnabled && sse.IsCitation(cleaned)) {
-				continue
-			}
-			batch.append("content", cleaned)
-		}
-		batch.flush()
-	}
 
 	outcome := assistantturn.FinalizeTurn(turn, assistantturn.FinalizeOptions{
 		AlreadyEmittedToolCalls: s.toolCallsEmitted || s.toolCallsDoneEmitted,
@@ -332,51 +272,7 @@ func (s *chatStreamRuntime) onParsed(parsed sse.LineResult) streamengine.ParsedD
 		if p.CitationOnly {
 			continue
 		}
-		if !s.bufferToolContent {
-			batch.append("content", p.VisibleText)
-		} else {
-			events := toolstream.ProcessChunk(&s.toolSieve, p.RawText, s.toolNames)
-			for _, evt := range events {
-				if len(evt.ToolCallDeltas) > 0 {
-					if !s.emitEarlyToolDeltas {
-						continue
-					}
-					filtered := filterIncrementalToolCallDeltasByAllowed(evt.ToolCallDeltas, s.streamToolNames)
-					if len(filtered) == 0 {
-						continue
-					}
-					formatted := formatIncrementalStreamToolCallDeltas(filtered, s.streamToolCallIDs)
-					if len(formatted) == 0 {
-						continue
-					}
-					batch.flush()
-					tcDelta := map[string]any{
-						"tool_calls": formatted,
-					}
-					s.toolCallsEmitted = true
-					s.sendDelta(tcDelta)
-					continue
-				}
-				if len(evt.ToolCalls) > 0 {
-					batch.flush()
-					s.toolCallsEmitted = true
-					s.toolCallsDoneEmitted = true
-					tcDelta := map[string]any{
-						"tool_calls": formatFinalStreamToolCallsWithStableIDs(evt.ToolCalls, s.streamToolCallIDs, s.toolsRaw),
-					}
-					s.sendDelta(tcDelta)
-					s.resetStreamToolCallState()
-					continue
-				}
-				if evt.Content != "" {
-					cleaned := cleanVisibleOutput(evt.Content, s.stripReferenceMarkers)
-					if cleaned == "" || (s.searchEnabled && sse.IsCitation(cleaned)) {
-						continue
-					}
-					batch.append("content", cleaned)
-				}
-			}
-		}
+		batch.append("content", p.VisibleText)
 	}
 	batch.flush()
 	return streamengine.ParsedDecision{ContentSeen: accumulated.ContentSeen}

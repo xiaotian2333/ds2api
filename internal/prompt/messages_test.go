@@ -32,10 +32,10 @@ func TestMessagesPrepareUsesTurnSuffixes(t *testing.T) {
 		{"role": "assistant", "content": "Answer"},
 	}
 	got := MessagesPrepare(messages)
-	if !strings.HasPrefix(got, "<｜begin▁of▁sentence｜>") {
-		t.Fatalf("expected begin-of-sentence marker, got %q", got)
+	if !strings.HasPrefix(got, beginSentenceMarker+systemMarker+"System rule") {
+		t.Fatalf("expected begin-of-sentence marker followed by system content, got %q", got)
 	}
-	if !strings.Contains(got, "<｜System｜>") || !strings.Contains(got, "<｜end▁of▁instructions｜>") || !strings.Contains(got, "System rule") {
+	if !strings.Contains(got, "<｜end▁of▁instructions｜>") {
 		t.Fatalf("expected system instructions to remain present, got %q", got)
 	}
 	if !strings.Contains(got, "<｜User｜>Question") {
@@ -46,23 +46,6 @@ func TestMessagesPrepareUsesTurnSuffixes(t *testing.T) {
 	}
 	if strings.Contains(got, "<think>") || strings.Contains(got, "</think>") {
 		t.Fatalf("did not expect think tags in prompt, got %q", got)
-	}
-}
-
-func TestMessagesPreparePrependsOutputIntegrityGuard(t *testing.T) {
-	messages := []map[string]any{
-		{"role": "system", "content": "System rule"},
-		{"role": "user", "content": "Question"},
-	}
-	got := MessagesPrepare(messages)
-	if !strings.HasPrefix(got, beginSentenceMarker+systemMarker+outputIntegrityGuardPrompt) {
-		t.Fatalf("expected output integrity guard to be prepended, got %q", got)
-	}
-	if !strings.Contains(got, outputIntegrityGuardPrompt+"\n\nSystem rule") {
-		t.Fatalf("expected output integrity guard to precede system prompt content, got %q", got)
-	}
-	if !strings.Contains(got, "<｜User｜>Question") {
-		t.Fatalf("expected user question after guard, got %q", got)
 	}
 }
 

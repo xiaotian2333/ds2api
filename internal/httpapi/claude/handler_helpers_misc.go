@@ -1,7 +1,6 @@
 package claude
 
 import (
-	"ds2api/internal/toolcall"
 	"fmt"
 	"strings"
 )
@@ -32,11 +31,28 @@ func extractClaudeToolNames(tools []any) []string {
 }
 
 func extractClaudeToolMeta(m map[string]any) (string, string, any) {
-	name, desc, schemaObj := toolcall.ExtractToolMeta(m)
-	if strings.TrimSpace(desc) == "" {
+	name := strings.TrimSpace(fmt.Sprintf("%v", m["name"]))
+	if name == "" {
+		if fn, ok := m["function"].(map[string]any); ok {
+			name = strings.TrimSpace(fmt.Sprintf("%v", fn["name"]))
+		}
+	}
+	desc := strings.TrimSpace(fmt.Sprintf("%v", m["description"]))
+	if desc == "" {
+		if fn, ok := m["function"].(map[string]any); ok {
+			desc = strings.TrimSpace(fmt.Sprintf("%v", fn["description"]))
+		}
+	}
+	if desc == "" {
 		desc = "No description available"
 	}
-	return strings.TrimSpace(name), strings.TrimSpace(desc), schemaObj
+	schemaObj := m["parameters"]
+	if schemaObj == nil {
+		if fn, ok := m["function"].(map[string]any); ok {
+			schemaObj = fn["parameters"]
+		}
+	}
+	return name, desc, schemaObj
 }
 
 func toMessageMaps(v any) []map[string]any {

@@ -12,7 +12,6 @@ import (
 	"ds2api/internal/httpapi/openai/shared"
 	"ds2api/internal/promptcompat"
 	"ds2api/internal/textclean"
-	"ds2api/internal/toolstream"
 )
 
 const openAIGeneralMaxSize = shared.GeneralMaxSize
@@ -51,20 +50,6 @@ func (h *Handler) preprocessInlineFileInputs(ctx context.Context, a *auth.Reques
 		return nil
 	}
 	return (&files.Handler{Store: h.Store, Auth: h.Auth, DS: h.DS, ChatHistory: h.ChatHistory}).PreprocessInlineFileInputs(ctx, a, req)
-}
-
-func (h *Handler) toolcallFeatureMatchEnabled() bool {
-	if h == nil {
-		return shared.ToolcallFeatureMatchEnabled(nil)
-	}
-	return shared.ToolcallFeatureMatchEnabled(h.Store)
-}
-
-func (h *Handler) toolcallEarlyEmitHighConfidence() bool {
-	if h == nil {
-		return shared.ToolcallEarlyEmitHighConfidence(nil)
-	}
-	return shared.ToolcallEarlyEmitHighConfidence(h.Store)
 }
 
 func writeOpenAIError(w http.ResponseWriter, status int, message string) {
@@ -109,8 +94,4 @@ func clonePayloadForEmptyOutputRetry(payload map[string]any, parentMessageID int
 
 func usagePromptWithEmptyOutputRetry(originalPrompt string, retryAttempts int) string {
 	return shared.UsagePromptWithEmptyOutputRetry(originalPrompt, retryAttempts)
-}
-
-func filterIncrementalToolCallDeltasByAllowed(deltas []toolstream.ToolCallDelta, seenNames map[int]string) []toolstream.ToolCallDelta {
-	return shared.FilterIncrementalToolCallDeltasByAllowed(deltas, seenNames)
 }

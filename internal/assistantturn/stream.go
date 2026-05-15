@@ -10,7 +10,6 @@ type StreamEventType string
 const (
 	StreamEventTextDelta     StreamEventType = "text_delta"
 	StreamEventThinkingDelta StreamEventType = "thinking_delta"
-	StreamEventToolCall      StreamEventType = "tool_call"
 	StreamEventDone          StreamEventType = "done"
 	StreamEventError         StreamEventType = "error"
 	StreamEventPing          StreamEventType = "ping"
@@ -20,7 +19,6 @@ type StreamEvent struct {
 	Type     StreamEventType
 	Text     string
 	Thinking string
-	ToolCall any
 	Error    *OutputError
 	Usage    *Usage
 }

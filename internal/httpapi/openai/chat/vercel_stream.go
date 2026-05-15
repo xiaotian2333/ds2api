@@ -109,7 +109,6 @@ func (h *Handler) handleVercelStreamPrepare(w http.ResponseWriter, r *http.Reque
 		"final_prompt":     stdReq.FinalPrompt,
 		"thinking_enabled": stdReq.Thinking,
 		"search_enabled":   stdReq.Search,
-		"tool_names":       stdReq.ToolNames,
 		"deepseek_token":   a.DeepSeekToken,
 		"pow_header":       powHeader,
 		"payload":          payload,

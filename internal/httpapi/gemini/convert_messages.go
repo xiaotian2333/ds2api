@@ -1,7 +1,6 @@
 package gemini
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -9,12 +8,6 @@ const maxGeminiRawPromptChars = 1024
 
 func geminiMessagesFromRequest(req map[string]any) []any {
 	out := make([]any, 0, 8)
-	toolCallCounter := 0
-	nextToolCallID := func() string {
-		toolCallCounter++
-		return fmt.Sprintf("call_gemini_%d", toolCallCounter)
-	}
-	lastToolCallIDByName := map[string]string{}
 	if sys := normalizeGeminiSystemInstruction(req["systemInstruction"]); strings.TrimSpace(sys) != "" {
 		out = append(out, map[string]any{
 			"role":    "system",
@@ -62,68 +55,6 @@ func geminiMessagesFromRequest(req map[string]any) []any {
 			}
 			if text := strings.TrimSpace(asString(part["text"])); text != "" {
 				textParts = append(textParts, text)
-				continue
-			}
-
-			if fnCall, ok := part["functionCall"].(map[string]any); ok {
-				flushText()
-				if name := strings.TrimSpace(asString(fnCall["name"])); name != "" {
-					callID := strings.TrimSpace(asString(fnCall["id"]))
-					if callID == "" {
-						if callID = strings.TrimSpace(asString(fnCall["call_id"])); callID == "" {
-							callID = nextToolCallID()
-						}
-					}
-					lastToolCallIDByName[strings.ToLower(name)] = callID
-					out = append(out, map[string]any{
-						"role": "assistant",
-						"tool_calls": []any{
-							map[string]any{
-								"id":   callID,
-								"type": "function",
-								"function": map[string]any{
-									"name":      name,
-									"arguments": stringifyJSON(fnCall["args"]),
-								},
-							},
-						},
-					})
-				}
-				continue
-			}
-
-			if fnResp, ok := part["functionResponse"].(map[string]any); ok {
-				flushText()
-				name := strings.TrimSpace(asString(fnResp["name"]))
-				callID := strings.TrimSpace(asString(fnResp["id"]))
-				if callID == "" {
-					callID = strings.TrimSpace(asString(fnResp["callId"]))
-				}
-				if callID == "" {
-					callID = strings.TrimSpace(asString(fnResp["tool_call_id"]))
-				}
-				if callID == "" {
-					callID = strings.TrimSpace(lastToolCallIDByName[strings.ToLower(name)])
-				}
-				if callID == "" {
-					callID = nextToolCallID()
-				}
-				content := fnResp["response"]
-				if content == nil {
-					content = fnResp["output"]
-				}
-				if content == nil {
-					content = ""
-				}
-				msg := map[string]any{
-					"role":         "tool",
-					"tool_call_id": callID,
-					"content":      content,
-				}
-				if name != "" {
-					msg["name"] = name
-				}
-				out = append(out, msg)
 				continue
 			}
 

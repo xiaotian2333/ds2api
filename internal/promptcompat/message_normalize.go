@@ -61,16 +61,12 @@ func buildAssistantContentForPrompt(msg map[string]any) string {
 	if reasoning == "" {
 		reasoning = strings.TrimSpace(extractOpenAIReasoningContentFromMessage(msg["content"]))
 	}
-	toolHistory := prompt.FormatToolCallsForPrompt(msg["tool_calls"])
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 2)
 	if reasoning != "" {
 		parts = append(parts, formatPromptLabeledBlock(assistantReasoningLabel, reasoning))
 	}
 	if content != "" {
 		parts = append(parts, content)
-	}
-	if toolHistory != "" {
-		parts = append(parts, toolHistory)
 	}
 	switch len(parts) {
 	case 0:

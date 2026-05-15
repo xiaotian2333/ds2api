@@ -1,26 +1,19 @@
 package openai
 
 import (
-	"ds2api/internal/toolcall"
 	"strings"
 	"time"
 )
 
 func BuildChatCompletion(completionID, model, finalPrompt, finalThinking, finalText string, toolNames []string, toolsRaw any) map[string]any {
-	detected := toolcall.ParseAssistantToolCallsDetailed(finalText, finalThinking, toolNames)
-	return BuildChatCompletionWithToolCalls(completionID, model, finalPrompt, finalThinking, finalText, detected.Calls, toolsRaw)
+	return BuildChatCompletionWithToolCalls(completionID, model, finalPrompt, finalThinking, finalText, nil, nil)
 }
 
-func BuildChatCompletionWithToolCalls(completionID, model, finalPrompt, finalThinking, finalText string, detected []toolcall.ParsedToolCall, toolsRaw any) map[string]any {
+func BuildChatCompletionWithToolCalls(completionID, model, finalPrompt, finalThinking, finalText string, detected []ParsedToolCall, toolsRaw any) map[string]any {
 	finishReason := "stop"
 	messageObj := map[string]any{"role": "assistant", "content": finalText}
 	if strings.TrimSpace(finalThinking) != "" {
 		messageObj["reasoning_content"] = finalThinking
-	}
-	if len(detected) > 0 {
-		finishReason = "tool_calls"
-		messageObj["tool_calls"] = toolcall.FormatOpenAIToolCalls(detected, toolsRaw)
-		messageObj["content"] = nil
 	}
 
 	return map[string]any{
@@ -60,4 +53,11 @@ func BuildChatStreamChunk(completionID string, created int64, model string, choi
 		out["usage"] = usage
 	}
 	return out
+}
+
+// ParsedToolCall is kept for backward compatibility of the BuildChatCompletionWithToolCalls signature.
+// It is no longer used for tool call detection.
+type ParsedToolCall struct {
+	Name  string         `json:"name"`
+	Input map[string]any `json:"input"`
 }

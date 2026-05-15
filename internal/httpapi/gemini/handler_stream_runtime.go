@@ -15,7 +15,7 @@ import (
 )
 
 //nolint:unused // retained for native Gemini stream handling path.
-func (h *Handler) handleStreamGenerateContent(w http.ResponseWriter, r *http.Request, resp *http.Response, model, finalPrompt string, thinkingEnabled, searchEnabled bool, toolNames []string, toolsRaw any, historySessions ...*responsehistory.Session) {
+func (h *Handler) handleStreamGenerateContent(w http.ResponseWriter, r *http.Request, resp *http.Response, model, finalPrompt string, thinkingEnabled, searchEnabled bool, historySessions ...*responsehistory.Session) {
 	var historySession *responsehistory.Session
 	if len(historySessions) > 0 {
 		historySession = historySessions[0]
@@ -37,7 +37,7 @@ func (h *Handler) handleStreamGenerateContent(w http.ResponseWriter, r *http.Req
 
 	rc := http.NewResponseController(w)
 	_, canFlush := w.(http.Flusher)
-	runtime := newGeminiStreamRuntime(w, rc, canFlush, model, finalPrompt, thinkingEnabled, searchEnabled, stripReferenceMarkersEnabled(), toolNames, toolsRaw, historySession)
+	runtime := newGeminiStreamRuntime(w, rc, canFlush, model, finalPrompt, thinkingEnabled, searchEnabled, stripReferenceMarkersEnabled(), historySession)
 
 	initialType := "text"
 	if thinkingEnabled {
@@ -70,10 +70,7 @@ type geminiStreamRuntime struct {
 
 	thinkingEnabled       bool
 	searchEnabled         bool
-	bufferContent         bool
 	stripReferenceMarkers bool
-	toolNames             []string
-	toolsRaw              any
 
 	accumulator       *assistantturn.Accumulator
 	contentFilter     bool
@@ -91,8 +88,6 @@ func newGeminiStreamRuntime(
 	thinkingEnabled bool,
 	searchEnabled bool,
 	stripReferenceMarkers bool,
-	toolNames []string,
-	toolsRaw any,
 	history *responsehistory.Session,
 ) *geminiStreamRuntime {
 	return &geminiStreamRuntime{
@@ -103,10 +98,7 @@ func newGeminiStreamRuntime(
 		finalPrompt:           finalPrompt,
 		thinkingEnabled:       thinkingEnabled,
 		searchEnabled:         searchEnabled,
-		bufferContent:         len(toolNames) > 0,
 		stripReferenceMarkers: stripReferenceMarkers,
-		toolNames:             toolNames,
-		toolsRaw:              toolsRaw,
 		history:               history,
 		accumulator: assistantturn.NewAccumulator(assistantturn.AccumulatorOptions{
 			ThinkingEnabled:       thinkingEnabled,
@@ -145,7 +137,7 @@ func (s *geminiStreamRuntime) onParsed(parsed sse.LineResult) streamengine.Parse
 	accumulated := s.accumulator.Apply(parsed)
 	for _, p := range accumulated.Parts {
 		if p.Type == "thinking" {
-			if p.VisibleText == "" || s.bufferContent {
+			if p.VisibleText == "" {
 				continue
 			}
 			s.sendChunk(map[string]any{
@@ -163,9 +155,6 @@ func (s *geminiStreamRuntime) onParsed(parsed sse.LineResult) streamengine.Parse
 			continue
 		}
 		if p.RawText == "" || p.CitationOnly || p.VisibleText == "" {
-			continue
-		}
-		if s.bufferContent {
 			continue
 		}
 		s.sendChunk(map[string]any{
@@ -207,8 +196,6 @@ func (s *geminiStreamRuntime) finalize() {
 		Prompt:                s.finalPrompt,
 		SearchEnabled:         s.searchEnabled,
 		StripReferenceMarkers: s.stripReferenceMarkers,
-		ToolNames:             s.toolNames,
-		ToolsRaw:              s.toolsRaw,
 	})
 	outcome := assistantturn.FinalizeTurn(turn, assistantturn.FinalizeOptions{})
 	if s.history != nil {
@@ -221,21 +208,19 @@ func (s *geminiStreamRuntime) finalize() {
 		)
 	}
 
-	if s.bufferContent {
-		parts := buildGeminiPartsFromTurn(turn)
-		s.sendChunk(map[string]any{
-			"candidates": []map[string]any{
-				{
-					"index": 0,
-					"content": map[string]any{
-						"role":  "model",
-						"parts": parts,
-					},
+	parts := buildGeminiPartsFromTurn(turn)
+	s.sendChunk(map[string]any{
+		"candidates": []map[string]any{
+			{
+				"index": 0,
+				"content": map[string]any{
+					"role":  "model",
+					"parts": parts,
 				},
 			},
-			"modelVersion": s.model,
-		})
-	}
+		},
+		"modelVersion": s.model,
+	})
 
 	s.sendChunk(map[string]any{
 		"candidates": []map[string]any{

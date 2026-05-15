@@ -1,12 +1,26 @@
 package promptcompat
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"ds2api/internal/config"
-	"ds2api/internal/prompt"
 )
+
+func stringifyToolCallArguments(argsRaw any) string {
+	if argsRaw == nil {
+		return "{}"
+	}
+	if s, ok := argsRaw.(string); ok {
+		return s
+	}
+	b, err := json.Marshal(argsRaw)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
 
 func normalizeResponsesInputItem(m map[string]any) map[string]any {
 	return normalizeResponsesInputItemWithState(m, nil)
@@ -133,7 +147,7 @@ func normalizeResponsesInputItemWithState(m map[string]any, callNameByID map[str
 
 		functionPayload := map[string]any{
 			"name":      name,
-			"arguments": prompt.StringifyToolCallArguments(argsRaw),
+			"arguments": stringifyToolCallArguments(argsRaw),
 		}
 		call := map[string]any{
 			"type":     "function",

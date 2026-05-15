@@ -19,10 +19,7 @@ import (
 	"ds2api/internal/httpapi/requestbody"
 	"ds2api/internal/promptcompat"
 	"ds2api/internal/responsehistory"
-	"ds2api/internal/sse"
-	"ds2api/internal/toolcall"
 	"ds2api/internal/translatorcliproxy"
-	"ds2api/internal/util"
 
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v6/sdk/translator"
 )
@@ -137,7 +134,7 @@ func (h *Handler) handleGeminiDirectStream(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	streamReq := start.Request
-	h.handleStreamGenerateContent(w, r, start.Response, streamReq.ResponseModel, streamReq.PromptTokenText, streamReq.Thinking, streamReq.Search, streamReq.ToolNames, streamReq.ToolsRaw, historySession)
+	h.handleStreamGenerateContent(w, r, start.Response, streamReq.ResponseModel, streamReq.PromptTokenText, streamReq.Thinking, streamReq.Search, historySession)
 }
 
 func (h *Handler) proxyViaOpenAI(w http.ResponseWriter, r *http.Request, stream bool) bool {
@@ -320,44 +317,6 @@ func writeGeminiErrorFromOpenAI(w http.ResponseWriter, status int, raw []byte) {
 }
 
 //nolint:unused // retained for native Gemini non-stream handling path.
-func (h *Handler) handleNonStreamGenerateContent(w http.ResponseWriter, resp *http.Response, model, finalPrompt string, thinkingEnabled bool, toolNames []string) {
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		writeGeminiError(w, resp.StatusCode, strings.TrimSpace(string(body)))
-		return
-	}
-
-	result := sse.CollectStream(resp, thinkingEnabled, true)
-	writeJSON(w, http.StatusOK, buildGeminiGenerateContentResponse(
-		model,
-		finalPrompt,
-		cleanVisibleOutput(result.Thinking, false),
-		cleanVisibleOutput(result.Text, false),
-		toolNames,
-	))
-}
-
-//nolint:unused // retained for native Gemini non-stream handling path.
-func buildGeminiGenerateContentResponse(model, finalPrompt, finalThinking, finalText string, toolNames []string) map[string]any {
-	parts := buildGeminiPartsFromFinal(finalText, finalThinking, toolNames)
-	usage := buildGeminiUsage(model, finalPrompt, finalThinking, finalText)
-	return map[string]any{
-		"candidates": []map[string]any{
-			{
-				"index": 0,
-				"content": map[string]any{
-					"role":  "model",
-					"parts": parts,
-				},
-				"finishReason": "STOP",
-			},
-		},
-		"modelVersion":  model,
-		"usageMetadata": usage,
-	}
-}
-
 func buildGeminiGenerateContentResponseFromTurn(turn assistantturn.Turn) map[string]any {
 	parts := buildGeminiPartsFromTurn(turn)
 	return map[string]any{
@@ -387,74 +346,9 @@ func buildGeminiPartsFromTurn(turn assistantturn.Turn) []map[string]any {
 		}
 		return []map[string]any{{"text": turn.Thinking, "thought": true}}
 	}
-	if len(turn.ToolCalls) > 0 {
-		parts := thinkingPart()
-		if parts == nil {
-			parts = make([]map[string]any, 0, len(turn.ToolCalls))
-		}
-		for _, tc := range turn.ToolCalls {
-			parts = append(parts, map[string]any{
-				"functionCall": map[string]any{
-					"name": tc.Name,
-					"args": tc.Input,
-				},
-			})
-		}
-		return parts
-	}
 	parts := thinkingPart()
 	if turn.Text != "" {
 		parts = append(parts, map[string]any{"text": turn.Text})
-	}
-	if len(parts) == 0 {
-		parts = append(parts, map[string]any{"text": ""})
-	}
-	return parts
-}
-
-//nolint:unused // retained for native Gemini non-stream handling path.
-func buildGeminiUsage(model, finalPrompt, finalThinking, finalText string) map[string]any {
-	promptTokens := util.CountPromptTokens(finalPrompt, model)
-	reasoningTokens := util.CountOutputTokens(finalThinking, model)
-	completionTokens := util.CountOutputTokens(finalText, model)
-	return map[string]any{
-		"promptTokenCount":     promptTokens,
-		"candidatesTokenCount": reasoningTokens + completionTokens,
-		"totalTokenCount":      promptTokens + reasoningTokens + completionTokens,
-	}
-}
-
-//nolint:unused // retained for native Gemini non-stream handling path.
-func buildGeminiPartsFromFinal(finalText, finalThinking string, toolNames []string) []map[string]any {
-	detected := toolcall.ParseToolCalls(finalText, toolNames)
-	if len(detected) == 0 && finalThinking != "" {
-		detected = toolcall.ParseToolCalls(finalThinking, toolNames)
-	}
-	thinkingPart := func() []map[string]any {
-		if finalThinking == "" {
-			return nil
-		}
-		return []map[string]any{{"text": finalThinking, "thought": true}}
-	}
-	if len(detected) > 0 {
-		parts := thinkingPart()
-		if parts == nil {
-			parts = make([]map[string]any, 0, len(detected))
-		}
-		for _, tc := range detected {
-			parts = append(parts, map[string]any{
-				"functionCall": map[string]any{
-					"name": tc.Name,
-					"args": tc.Input,
-				},
-			})
-		}
-		return parts
-	}
-
-	parts := thinkingPart()
-	if finalText != "" {
-		parts = append(parts, map[string]any{"text": finalText})
 	}
 	if len(parts) == 0 {
 		parts = append(parts, map[string]any{"text": ""})

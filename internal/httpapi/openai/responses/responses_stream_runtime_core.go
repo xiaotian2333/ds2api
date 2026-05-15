@@ -1,19 +1,15 @@
 package responses
 
 import (
-	"ds2api/internal/assistantturn"
-	"ds2api/internal/toolcall"
 	"net/http"
 	"strings"
 
-	"ds2api/internal/config"
+	"ds2api/internal/assistantturn"
 	openaifmt "ds2api/internal/format/openai"
 	"ds2api/internal/httpapi/openai/shared"
-	"ds2api/internal/promptcompat"
 	"ds2api/internal/responsehistory"
 	"ds2api/internal/sse"
 	streamengine "ds2api/internal/stream"
-	"ds2api/internal/toolstream"
 )
 
 type responsesStreamRuntime struct {
@@ -25,31 +21,16 @@ type responsesStreamRuntime struct {
 	model         string
 	finalPrompt   string
 	refFileTokens int
-	toolNames     []string
-	toolsRaw      any
 	traceID       string
-	toolChoice    promptcompat.ToolChoicePolicy
 
 	thinkingEnabled       bool
 	searchEnabled         bool
 	stripReferenceMarkers bool
 
-	bufferToolContent    bool
-	emitEarlyToolDeltas  bool
-	toolCallsEmitted     bool
-	toolCallsDoneEmitted bool
-
-	sieve             toolstream.State
 	accumulator       shared.StreamAccumulator
 	visibleText       strings.Builder
 	responseMessageID int
-	streamToolCallIDs map[int]string
-	functionItemIDs   map[int]string
-	functionOutputIDs map[int]int
-	functionArgs      map[int]string
-	functionDone      map[int]bool
-	functionAdded     map[int]bool
-	functionNames     map[int]string
+
 	messageItemID     string
 	messageOutputID   int
 	nextOutputID      int
@@ -75,11 +56,6 @@ func newResponsesStreamRuntime(
 	thinkingEnabled bool,
 	searchEnabled bool,
 	stripReferenceMarkers bool,
-	toolNames []string,
-	toolsRaw any,
-	bufferToolContent bool,
-	emitEarlyToolDeltas bool,
-	toolChoice promptcompat.ToolChoicePolicy,
 	traceID string,
 	persistResponse func(obj map[string]any),
 	history *responsehistory.Session,
@@ -94,22 +70,10 @@ func newResponsesStreamRuntime(
 		thinkingEnabled:       thinkingEnabled,
 		searchEnabled:         searchEnabled,
 		stripReferenceMarkers: stripReferenceMarkers,
-		toolNames:             toolNames,
-		toolsRaw:              toolsRaw,
-		bufferToolContent:     bufferToolContent,
-		emitEarlyToolDeltas:   emitEarlyToolDeltas,
-		streamToolCallIDs:     map[int]string{},
-		functionItemIDs:       map[int]string{},
-		functionOutputIDs:     map[int]int{},
-		functionArgs:          map[int]string{},
-		functionDone:          map[int]bool{},
-		functionAdded:         map[int]bool{},
-		functionNames:         map[int]string{},
-		messageOutputID:       -1,
-		toolChoice:            toolChoice,
 		traceID:               traceID,
 		persistResponse:       persistResponse,
 		history:               history,
+		messageOutputID:       -1,
 		accumulator: shared.StreamAccumulator{
 			ThinkingEnabled:       thinkingEnabled,
 			SearchEnabled:         searchEnabled,
@@ -161,9 +125,6 @@ func (s *responsesStreamRuntime) finalize(finishReason string, deferEmptyOutput 
 	s.finalErrorStatus = 0
 	s.finalErrorMessage = ""
 	s.finalErrorCode = ""
-	if s.bufferToolContent {
-		s.processToolStreamEvents(toolstream.Flush(&s.sieve, s.toolNames), true, true)
-	}
 
 	finalThinking := s.accumulator.Thinking.String()
 	finalToolDetectionThinking := s.accumulator.ToolDetectionThinking.String()
@@ -176,34 +137,17 @@ func (s *responsesStreamRuntime) finalize(finishReason string, deferEmptyOutput 
 		DetectionThinking:     finalToolDetectionThinking,
 		ContentFilter:         finishReason == "content_filter",
 		ResponseMessageID:     s.responseMessageID,
-		AlreadyEmittedCalls:   s.toolCallsEmitted,
-		AlreadyEmittedToolRaw: s.toolCallsDoneEmitted,
 	}, assistantturn.BuildOptions{
 		Model:                 s.model,
 		Prompt:                s.finalPrompt,
 		RefFileTokens:         s.refFileTokens,
 		SearchEnabled:         s.searchEnabled,
 		StripReferenceMarkers: s.stripReferenceMarkers,
-		ToolNames:             s.toolNames,
-		ToolsRaw:              s.toolsRaw,
-		ToolChoice:            s.toolChoice,
 	})
-	textParsed := turn.ParsedToolCalls
-	detected := turn.ToolCalls
-	s.logToolPolicyRejections(textParsed)
-
-	if len(detected) > 0 {
-		s.toolCallsEmitted = true
-		if !s.toolCallsDoneEmitted {
-			s.emitFunctionCallDoneEvents(detected)
-		}
-	}
 
 	s.closeMessageItem()
 
-	outcome := assistantturn.FinalizeTurn(turn, assistantturn.FinalizeOptions{
-		AlreadyEmittedToolCalls: s.toolCallsEmitted || s.toolCallsDoneEmitted,
-	})
+	outcome := assistantturn.FinalizeTurn(turn, assistantturn.FinalizeOptions{})
 	if outcome.ShouldFail {
 		status, message, code := outcome.Error.Status, outcome.Error.Message, outcome.Error.Code
 		if deferEmptyOutput {
@@ -215,9 +159,8 @@ func (s *responsesStreamRuntime) finalize(finishReason string, deferEmptyOutput 
 		s.failResponse(status, message, code)
 		return true
 	}
-	s.closeIncompleteFunctionItems()
 
-	obj := s.buildCompletedResponseObject(turn.Thinking, turn.Text, detected)
+	obj := buildCompletedResponseObject(s.responseID, s.model, s.finalPrompt, turn.Thinking, turn.Text, s.visibleText.String(), s.messageAdded, s.ensureMessageItemID, s.ensureMessageOutputIndex)
 	if s.persistResponse != nil {
 		s.persistResponse(obj)
 	}
@@ -233,23 +176,6 @@ func (s *responsesStreamRuntime) finalize(finishReason string, deferEmptyOutput 
 	s.sendEvent("response.completed", openaifmt.BuildResponsesCompletedPayload(obj))
 	s.sendDone()
 	return true
-}
-
-func (s *responsesStreamRuntime) logToolPolicyRejections(textParsed toolcall.ToolCallParseResult) {
-	logRejected := func(parsed toolcall.ToolCallParseResult, channel string) {
-		rejected := filteredRejectedToolNamesForLog(parsed.RejectedToolNames)
-		if !parsed.RejectedByPolicy || len(rejected) == 0 {
-			return
-		}
-		config.Logger.Warn(
-			"[responses] rejected tool calls by policy",
-			"trace_id", strings.TrimSpace(s.traceID),
-			"channel", channel,
-			"tool_choice_mode", s.toolChoice.Mode,
-			"rejected_tool_names", strings.Join(rejected, ","),
-		)
-	}
-	logRejected(textParsed, "text")
 }
 
 func (s *responsesStreamRuntime) onParsed(parsed sse.LineResult) streamengine.ParsedDecision {
@@ -279,12 +205,7 @@ func (s *responsesStreamRuntime) onParsed(parsed sse.LineResult) streamengine.Pa
 		if p.CitationOnly {
 			continue
 		}
-		if !s.bufferToolContent {
-			batch.append("text", p.VisibleText)
-			continue
-		}
-		batch.flush()
-		s.processToolStreamEvents(toolstream.ProcessChunk(&s.sieve, p.RawText, s.toolNames), true, true)
+		batch.append("text", p.VisibleText)
 	}
 
 	batch.flush()
@@ -295,4 +216,49 @@ func (s *responsesStreamRuntime) onParsed(parsed sse.LineResult) streamengine.Pa
 		)
 	}
 	return streamengine.ParsedDecision{ContentSeen: accumulated.ContentSeen}
+}
+
+func buildCompletedResponseObject(responseID, model, finalPrompt, finalThinking, finalText, visibleText string, messageAdded bool, ensureMessageItemID func() string, ensureMessageOutputIndex func() int) map[string]any {
+	output := make([]any, 0, 1)
+	content := make([]any, 0, 2)
+	if finalThinking != "" {
+		content = append(content, map[string]any{
+			"type": "reasoning",
+			"text": finalThinking,
+		})
+	}
+	if finalText != "" {
+		content = append(content, map[string]any{
+			"type": "output_text",
+			"text": finalText,
+		})
+	}
+	if len(content) > 0 {
+		output = append(output, map[string]any{
+			"id":      ensureMessageItemID(),
+			"type":    "message",
+			"role":    "assistant",
+			"status":  "completed",
+			"content": content,
+		})
+	}
+
+	outputText := visibleText
+	if outputText == "" {
+		if finalText != "" {
+			outputText = finalText
+		} else if finalThinking != "" {
+			outputText = finalThinking
+		}
+	}
+
+	return openaifmt.BuildResponseObjectFromItems(
+		responseID,
+		model,
+		finalPrompt,
+		finalThinking,
+		finalText,
+		output,
+		outputText,
+	)
 }

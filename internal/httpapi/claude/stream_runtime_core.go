@@ -9,8 +9,6 @@ import (
 	"ds2api/internal/responsehistory"
 	"ds2api/internal/sse"
 	streamengine "ds2api/internal/stream"
-	"ds2api/internal/toolcall"
-	"ds2api/internal/toolstream"
 )
 
 type claudeStreamRuntime struct {
@@ -19,25 +17,20 @@ type claudeStreamRuntime struct {
 	canFlush bool
 
 	model           string
-	toolNames       []string
 	messages        []any
-	toolsRaw        any
 	promptTokenText string
 
 	thinkingEnabled       bool
 	searchEnabled         bool
-	bufferToolContent     bool
 	stripReferenceMarkers bool
 
 	messageID string
 	thinking  strings.Builder
 	text      strings.Builder
 
-	sieve                 toolstream.State
 	rawText               strings.Builder
 	rawThinking           strings.Builder
 	toolDetectionThinking strings.Builder
-	toolCallsDetected     bool
 
 	nextBlockIndex     int
 	thinkingBlockOpen  bool
@@ -59,8 +52,6 @@ func newClaudeStreamRuntime(
 	thinkingEnabled bool,
 	searchEnabled bool,
 	stripReferenceMarkers bool,
-	toolNames []string,
-	toolsRaw any,
 	promptTokenText string,
 	history *responsehistory.Session,
 ) *claudeStreamRuntime {
@@ -72,10 +63,7 @@ func newClaudeStreamRuntime(
 		messages:              messages,
 		thinkingEnabled:       thinkingEnabled,
 		searchEnabled:         searchEnabled,
-		bufferToolContent:     len(toolNames) > 0,
 		stripReferenceMarkers: stripReferenceMarkers,
-		toolNames:             toolNames,
-		toolsRaw:              toolsRaw,
 		promptTokenText:       promptTokenText,
 		history:               history,
 		messageID:             fmt.Sprintf("msg_%d", time.Now().UnixNano()),
@@ -162,78 +150,29 @@ func (s *claudeStreamRuntime) onParsed(parsed sse.LineResult) streamengine.Parse
 		}
 
 		s.text.WriteString(cleanedText)
-
-		if !s.bufferToolContent {
-			s.closeThinkingBlock()
-			if !s.textBlockOpen {
-				s.textBlockIndex = s.nextBlockIndex
-				s.nextBlockIndex++
-				s.send("content_block_start", map[string]any{
-					"type":  "content_block_start",
-					"index": s.textBlockIndex,
-					"content_block": map[string]any{
-						"type": "text",
-						"text": "",
-					},
-				})
-				s.textBlockOpen = true
-			}
-			s.send("content_block_delta", map[string]any{
-				"type":  "content_block_delta",
+		s.closeThinkingBlock()
+		if !s.textBlockOpen {
+			s.textBlockIndex = s.nextBlockIndex
+			s.nextBlockIndex++
+			s.send("content_block_start", map[string]any{
+				"type":  "content_block_start",
 				"index": s.textBlockIndex,
-				"delta": map[string]any{
-					"type": "text_delta",
-					"text": cleanedText,
+				"content_block": map[string]any{
+					"type": "text",
+					"text": "",
 				},
 			})
-			s.textEmitted = true
-			continue
+			s.textBlockOpen = true
 		}
-
-		events := toolstream.ProcessChunk(&s.sieve, rawTrimmed, s.toolNames)
-		for _, evt := range events {
-			if len(evt.ToolCalls) > 0 {
-				s.closeTextBlock()
-				s.toolCallsDetected = true
-				normalized := toolcall.NormalizeParsedToolCallsForSchemas(evt.ToolCalls, s.toolsRaw)
-				for _, tc := range normalized {
-					idx := s.nextBlockIndex
-					s.nextBlockIndex++
-					s.sendToolUseBlock(idx, tc)
-				}
-				continue
-			}
-			if evt.Content == "" {
-				continue
-			}
-			cleaned := cleanVisibleOutput(evt.Content, s.stripReferenceMarkers)
-			if cleaned == "" || (s.searchEnabled && sse.IsCitation(cleaned)) {
-				continue
-			}
-			s.closeThinkingBlock()
-			if !s.textBlockOpen {
-				s.textBlockIndex = s.nextBlockIndex
-				s.nextBlockIndex++
-				s.send("content_block_start", map[string]any{
-					"type":  "content_block_start",
-					"index": s.textBlockIndex,
-					"content_block": map[string]any{
-						"type": "text",
-						"text": "",
-					},
-				})
-				s.textBlockOpen = true
-			}
-			s.send("content_block_delta", map[string]any{
-				"type":  "content_block_delta",
-				"index": s.textBlockIndex,
-				"delta": map[string]any{
-					"type": "text_delta",
-					"text": cleaned,
-				},
-			})
-			s.textEmitted = true
-		}
+		s.send("content_block_delta", map[string]any{
+			"type":  "content_block_delta",
+			"index": s.textBlockIndex,
+			"delta": map[string]any{
+				"type": "text_delta",
+				"text": cleanedText,
+			},
+		})
+		s.textEmitted = true
 	}
 
 	if s.history != nil {
