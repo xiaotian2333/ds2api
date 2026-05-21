@@ -32,17 +32,14 @@ func TestMessagesPrepareUsesTurnSuffixes(t *testing.T) {
 		{"role": "assistant", "content": "Answer"},
 	}
 	got := MessagesPrepare(messages)
-	if !strings.HasPrefix(got, beginSentenceMarker+systemMarker+"System rule") {
-		t.Fatalf("expected begin-of-sentence marker followed by system content, got %q", got)
+	if !strings.HasPrefix(got, "System rule") {
+		t.Fatalf("expected system content at the start, got %q", got)
 	}
-	if !strings.Contains(got, "<｜end▁of▁instructions｜>") {
-		t.Fatalf("expected system instructions to remain present, got %q", got)
-	}
-	if !strings.Contains(got, "<｜User｜>Question") {
+	if !strings.Contains(got, "用户：Question") {
 		t.Fatalf("expected user question, got %q", got)
 	}
-	if !strings.Contains(got, "<｜Assistant｜>Answer<｜end▁of▁sentence｜>") {
-		t.Fatalf("expected assistant sentence suffix, got %q", got)
+	if !strings.Contains(got, "助手：Answer") {
+		t.Fatalf("expected assistant answer, got %q", got)
 	}
 	if strings.Contains(got, "<think>") || strings.Contains(got, "</think>") {
 		t.Fatalf("did not expect think tags in prompt, got %q", got)
@@ -65,7 +62,7 @@ func TestMessagesPrepareWithThinkingPreservesPromptShape(t *testing.T) {
 	if gotThinking != gotPlain {
 		t.Fatalf("expected thinking flag not to add extra continuity instructions, got thinking=%q plain=%q", gotThinking, gotPlain)
 	}
-	if !strings.HasSuffix(gotThinking, "<｜Assistant｜>") {
+	if !strings.HasSuffix(gotThinking, "助手：") {
 		t.Fatalf("expected assistant suffix, got %q", gotThinking)
 	}
 }

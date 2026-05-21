@@ -13,10 +13,10 @@ func TestMessagesPrepareBasic(t *testing.T) {
 	if got == "" {
 		t.Fatal("expected non-empty prompt")
 	}
-	if !strings.HasPrefix(got, "<｜begin▁of▁sentence｜><｜User｜>") {
-		t.Fatalf("expected begin-of-sentence marker followed by user at the start, got %q", got)
+	if !strings.HasPrefix(got, "用户：") {
+		t.Fatalf("expected user marker at the start, got %q", got)
 	}
-	if !strings.Contains(got, "Hello") || !strings.HasSuffix(got, "<｜Assistant｜>") {
+	if !strings.Contains(got, "Hello") || !strings.HasSuffix(got, "助手：") {
 		t.Fatalf("unexpected prompt: %q", got)
 	}
 }
@@ -30,32 +30,26 @@ func TestMessagesPrepareRoles(t *testing.T) {
 		{"role": "user", "content": "How are you"},
 	}
 	got := MessagesPrepare(messages)
-	if !contains(got, "You are helper") || !contains(got, "<｜User｜>Hi") {
+	if !contains(got, "You are helper") || !contains(got, "用户：Hi") {
 		t.Fatalf("expected system/user content in %q", got)
 	}
-	if !contains(got, "<｜begin▁of▁sentence｜>") {
-		t.Fatalf("expected begin marker in %q", got)
-	}
-	if !contains(got, "<｜User｜>Hi<｜Assistant｜>Hello<｜end▁of▁sentence｜>") {
+	if !contains(got, "用户：Hi助手：Hello") {
 		t.Fatalf("expected user/assistant separation in %q", got)
 	}
-	if !contains(got, "<｜Assistant｜>Hello<｜end▁of▁sentence｜><｜Tool｜>Search results<｜end▁of▁toolresults｜>") {
-		t.Fatalf("expected assistant/tool separation in %q", got)
-	}
-	if !contains(got, "<｜Tool｜>Search results<｜end▁of▁toolresults｜><｜User｜>How are you") {
-		t.Fatalf("expected tool/user separation in %q", got)
-	}
-	if !contains(got, "<｜Assistant｜>") {
+	if !contains(got, "助手：Hello") {
 		t.Fatalf("expected assistant marker in %q", got)
 	}
-	if !contains(got, "<｜System｜>") {
-		t.Fatalf("expected system marker in %q", got)
+	if !contains(got, "系统提示：此环境不可调用工具，调用已被拦截") {
+		t.Fatalf("expected tool interception notice in %q", got)
 	}
-	if !contains(got, "<｜User｜>") {
+	if !contains(got, "用户：How are you") {
 		t.Fatalf("expected user marker in %q", got)
 	}
-	if !contains(got, "<｜Tool｜>") {
-		t.Fatalf("expected tool marker in %q", got)
+	if !contains(got, "助手：") {
+		t.Fatalf("expected assistant marker in %q", got)
+	}
+	if !contains(got, "用户：") {
+		t.Fatalf("expected user marker in %q", got)
 	}
 }
 

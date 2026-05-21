@@ -17,14 +17,14 @@ func asString(v any) string {
 }
 
 const (
-	beginSentenceMarker        = "<｜begin▁of▁sentence｜>"
-	systemMarker               = "<｜System｜>"
-	userMarker                 = "<｜User｜>"
-	assistantMarker            = "<｜Assistant｜>"
-	toolMarker                 = "<｜Tool｜>"
-	endSentenceMarker          = "<｜end▁of▁sentence｜>"
-	endToolResultsMarker       = "<｜end▁of▁toolresults｜>"
-	endInstructionsMarker      = "<｜end▁of▁instructions｜>"
+	beginSentenceMarker        = ""
+	systemMarker               = ""
+	userMarker                 = "用户："
+	assistantMarker            = "助手："
+	toolMarker                 = "工具："
+	endSentenceMarker          = ""
+	endToolResultsMarker       = ""
+	endInstructionsMarker      = ""
 )
 
 func MessagesPrepare(messages []map[string]any) string {
@@ -54,7 +54,6 @@ func MessagesPrepareWithThinking(messages []map[string]any, _ bool) string {
 		merged = append(merged, msg)
 	}
 	parts := make([]string, 0, len(merged)+2)
-	parts = append(parts, beginSentenceMarker)
 	lastRole := ""
 	for _, m := range merged {
 		lastRole = m.Role
@@ -62,12 +61,10 @@ func MessagesPrepareWithThinking(messages []map[string]any, _ bool) string {
 		case "assistant":
 			parts = append(parts, formatRoleBlock(assistantMarker, m.Text, endSentenceMarker))
 		case "tool":
-			if strings.TrimSpace(m.Text) != "" {
-				parts = append(parts, formatRoleBlock(toolMarker, m.Text, endToolResultsMarker))
-			}
+			parts = append(parts, "\n【系统提示：此环境不可调用工具，调用已被拦截】\n")
 		case "system":
 			if text := strings.TrimSpace(m.Text); text != "" {
-				parts = append(parts, formatRoleBlock(systemMarker, text, endInstructionsMarker))
+				parts = append(parts, text)
 			}
 		case "user":
 			parts = append(parts, formatRoleBlock(userMarker, m.Text, ""))
