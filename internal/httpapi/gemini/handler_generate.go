@@ -15,10 +15,12 @@ import (
 	"ds2api/internal/assistantturn"
 	"ds2api/internal/auth"
 	"ds2api/internal/completionruntime"
+	"ds2api/internal/config"
 	"ds2api/internal/httpapi/openai/history"
 	"ds2api/internal/httpapi/requestbody"
 	"ds2api/internal/promptcompat"
 	"ds2api/internal/responsehistory"
+	"ds2api/internal/sensitivewords"
 	"ds2api/internal/translatorcliproxy"
 
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v6/sdk/translator"
@@ -63,6 +65,11 @@ func (h *Handler) handleGeminiDirect(w http.ResponseWriter, r *http.Request, str
 	var req map[string]any
 	if err := json.Unmarshal(raw, &req); err != nil {
 		writeGeminiError(w, http.StatusBadRequest, "invalid json")
+		return true
+	}
+	if matched, pattern := h.checkSensitiveWords(req); matched {
+		config.Logger.Warn("[sensitive_words] 拦截 Gemini 请求", "pattern", pattern)
+		writeGeminiError(w, 422, h.Store.SensitiveWordsBlockMessage())
 		return true
 	}
 	stdReq, err := normalizeGeminiRequest(h.Store, routeModel, req, stream)
@@ -337,6 +344,19 @@ func buildGeminiGenerateContentResponseFromTurn(turn assistantturn.Turn) map[str
 			"totalTokenCount":      turn.Usage.TotalTokens,
 		},
 	}
+}
+
+func (h *Handler) checkSensitiveWords(req map[string]any) (matched bool, pattern string) {
+	if h.SensitiveWordsMatcher == nil || !h.Store.SensitiveWordsEnabled() {
+		return false, ""
+	}
+	texts := sensitivewords.ExtractTextFromRequest(req)
+	for _, text := range texts {
+		if ok, p := h.SensitiveWordsMatcher.Check(text); ok {
+			return true, p
+		}
+	}
+	return false, ""
 }
 
 func buildGeminiPartsFromTurn(turn assistantturn.Turn) []map[string]any {

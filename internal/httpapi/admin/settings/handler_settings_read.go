@@ -39,6 +39,11 @@ func (h *Handler) getSettings(w http.ResponseWriter, _ *http.Request) {
 			"prompt":         h.Store.ThinkingInjectionPrompt(),
 			"default_prompt": promptcompat.DefaultThinkingInjectionPrompt,
 		},
+		"sensitive_words": map[string]any{
+			"enabled":       snap.SensitiveWords.Enabled,
+			"patterns":      snap.SensitiveWords.Patterns,
+			"block_message": snap.SensitiveWords.BlockMessage,
+		},
 		"model_aliases":     snap.ModelAliases,
 		"env_backed":        h.Store.IsEnvBacked(),
 		"needs_vercel_sync": needsSync,

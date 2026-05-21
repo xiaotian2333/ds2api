@@ -23,6 +23,10 @@ type claudeHistoryConfig struct {
 func (m claudeHistoryConfig) ModelAliases() map[string]string { return m.aliases }
 func (claudeHistoryConfig) CurrentInputFileEnabled() bool     { return false }
 func (claudeHistoryConfig) CurrentInputFileMinChars() int     { return 0 }
+func (claudeHistoryConfig) SensitiveWordsEnabled() bool       { return false }
+func (claudeHistoryConfig) SensitiveWordsBlockMessage() string {
+	return "请求被拦截：输入包含敏感词"
+}
 
 func (claudeCurrentInputAuth) Determine(*http.Request) (*auth.RequestAuth, error) {
 	return &auth.RequestAuth{

@@ -45,6 +45,8 @@ type ConfigReader interface {
 	CurrentInputFileMinChars() int
 	ThinkingInjectionEnabled() bool
 	ThinkingInjectionPrompt() string
+	SensitiveWordsEnabled() bool
+	SensitiveWordsBlockMessage() string
 }
 
 type Deps struct {

@@ -16,6 +16,10 @@ func (s claudeProxyStoreStub) ModelAliases() map[string]string { return s.aliase
 
 func (claudeProxyStoreStub) CurrentInputFileEnabled() bool { return true }
 func (claudeProxyStoreStub) CurrentInputFileMinChars() int { return 0 }
+func (claudeProxyStoreStub) SensitiveWordsEnabled() bool   { return false }
+func (claudeProxyStoreStub) SensitiveWordsBlockMessage() string {
+	return "请求被拦截：输入包含敏感词"
+}
 
 type openAIProxyStub struct {
 	status int

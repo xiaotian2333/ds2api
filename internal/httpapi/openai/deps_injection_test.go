@@ -43,6 +43,10 @@ func (m mockOpenAIConfig) ThinkingInjectionEnabled() bool {
 	return *m.thinkingInjection
 }
 func (m mockOpenAIConfig) ThinkingInjectionPrompt() string { return m.thinkingPrompt }
+func (mockOpenAIConfig) SensitiveWordsEnabled() bool       { return false }
+func (mockOpenAIConfig) SensitiveWordsBlockMessage() string {
+	return "请求被拦截：输入包含敏感词"
+}
 
 func TestNormalizeOpenAIChatRequestWithConfigInterface(t *testing.T) {
 	cfg := mockOpenAIConfig{

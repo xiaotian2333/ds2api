@@ -20,6 +20,7 @@ type Config struct {
 	AutoDelete        AutoDeleteConfig        `json:"auto_delete"`
 	CurrentInputFile  CurrentInputFileConfig  `json:"current_input_file,omitempty"`
 	ThinkingInjection ThinkingInjectionConfig `json:"thinking_injection,omitempty"`
+	SensitiveWords    SensitiveWordsConfig    `json:"sensitive_words,omitempty"`
 	Vercel            VercelConfig            `json:"vercel,omitempty"`
 	VercelSyncHash    string                  `json:"_vercel_sync_hash,omitempty"`
 	VercelSyncTime    int64                   `json:"_vercel_sync_time,omitempty"`
@@ -166,6 +167,12 @@ type EmbeddingsConfig struct {
 type AutoDeleteConfig struct {
 	Mode     string `json:"mode,omitempty"`
 	Sessions bool   `json:"sessions,omitempty"`
+}
+
+type SensitiveWordsConfig struct {
+	Enabled      bool     `json:"enabled,omitempty"`
+	Patterns     []string `json:"patterns,omitempty"`
+	BlockMessage string   `json:"block_message,omitempty"`
 }
 
 type CurrentInputFileConfig struct {

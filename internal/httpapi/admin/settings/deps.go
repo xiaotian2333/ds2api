@@ -4,6 +4,7 @@ import (
 	"ds2api/internal/chathistory"
 	"ds2api/internal/config"
 	adminshared "ds2api/internal/httpapi/admin/shared"
+	"ds2api/internal/sensitivewords"
 )
 
 type Handler struct {
@@ -12,6 +13,8 @@ type Handler struct {
 	DS          adminshared.DeepSeekCaller
 	OpenAI      adminshared.OpenAIChatCaller
 	ChatHistory *chathistory.Store
+
+	SensitiveWordsMatcher *sensitivewords.Matcher
 }
 
 var writeJSON = adminshared.WriteJSON

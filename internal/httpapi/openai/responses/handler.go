@@ -11,6 +11,7 @@ import (
 	"ds2api/internal/httpapi/openai/history"
 	"ds2api/internal/httpapi/openai/shared"
 	"ds2api/internal/promptcompat"
+	"ds2api/internal/sensitivewords"
 	"ds2api/internal/textclean"
 )
 
@@ -23,6 +24,8 @@ type Handler struct {
 	Auth        shared.AuthResolver
 	DS          shared.DeepSeekCaller
 	ChatHistory *chathistory.Store
+
+	SensitiveWordsMatcher *sensitivewords.Matcher
 
 	responsesMu sync.Mutex
 	responses   *responseStore

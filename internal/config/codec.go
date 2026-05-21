@@ -48,6 +48,9 @@ func (c Config) MarshalJSON() ([]byte, error) {
 	if c.ThinkingInjection.Enabled != nil || strings.TrimSpace(c.ThinkingInjection.Prompt) != "" {
 		m["thinking_injection"] = c.ThinkingInjection
 	}
+	if c.SensitiveWords.Enabled || len(c.SensitiveWords.Patterns) > 0 || strings.TrimSpace(c.SensitiveWords.BlockMessage) != "" {
+		m["sensitive_words"] = c.SensitiveWords
+	}
 	if strings.TrimSpace(c.Vercel.Token) != "" || strings.TrimSpace(c.Vercel.ProjectID) != "" || strings.TrimSpace(c.Vercel.TeamID) != "" {
 		m["vercel"] = NormalizeVercelConfig(c.Vercel)
 	}
@@ -128,6 +131,10 @@ func (c *Config) UnmarshalJSON(b []byte) error {
 			if err := json.Unmarshal(v, &c.ThinkingInjection); err != nil {
 				return fmt.Errorf("invalid field %q: %w", k, err)
 			}
+		case "sensitive_words":
+			if err := json.Unmarshal(v, &c.SensitiveWords); err != nil {
+				return fmt.Errorf("invalid field %q: %w", k, err)
+			}
 		case "vercel":
 			if err := json.Unmarshal(v, &c.Vercel); err != nil {
 				return fmt.Errorf("invalid field %q: %w", k, err)
@@ -170,6 +177,11 @@ func (c Config) Clone() Config {
 		ThinkingInjection: ThinkingInjectionConfig{
 			Enabled: cloneBoolPtr(c.ThinkingInjection.Enabled),
 			Prompt:  c.ThinkingInjection.Prompt,
+		},
+		SensitiveWords: SensitiveWordsConfig{
+			Enabled:      c.SensitiveWords.Enabled,
+			Patterns:     slices.Clone(c.SensitiveWords.Patterns),
+			BlockMessage: c.SensitiveWords.BlockMessage,
 		},
 		Vercel:           c.Vercel,
 		VercelSyncHash:   c.VercelSyncHash,

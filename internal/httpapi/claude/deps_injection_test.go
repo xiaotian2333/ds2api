@@ -9,6 +9,10 @@ type mockClaudeConfig struct {
 func (m mockClaudeConfig) ModelAliases() map[string]string { return m.aliases }
 func (mockClaudeConfig) CurrentInputFileEnabled() bool     { return true }
 func (mockClaudeConfig) CurrentInputFileMinChars() int     { return 0 }
+func (mockClaudeConfig) SensitiveWordsEnabled() bool       { return false }
+func (mockClaudeConfig) SensitiveWordsBlockMessage() string {
+	return "请求被拦截：输入包含敏感词"
+}
 
 func TestNormalizeClaudeRequestUsesGlobalAliasMapping(t *testing.T) {
 	req := map[string]any{

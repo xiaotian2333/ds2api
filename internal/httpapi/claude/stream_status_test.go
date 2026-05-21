@@ -25,6 +25,10 @@ func (streamStatusClaudeStoreStub) ModelAliases() map[string]string { return nil
 
 func (streamStatusClaudeStoreStub) CurrentInputFileEnabled() bool { return true }
 func (streamStatusClaudeStoreStub) CurrentInputFileMinChars() int { return 0 }
+func (streamStatusClaudeStoreStub) SensitiveWordsEnabled() bool   { return false }
+func (streamStatusClaudeStoreStub) SensitiveWordsBlockMessage() string {
+	return "请求被拦截：输入包含敏感词"
+}
 
 func captureClaudeStatusMiddleware(statuses *[]int) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {

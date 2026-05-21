@@ -2,6 +2,7 @@ package settings
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -32,6 +33,7 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	currentInputMinCharsSet := hasNestedSettingsKey(req, "current_input_file", "min_chars")
 	thinkingInjectionEnabledSet := hasNestedSettingsKey(req, "thinking_injection", "enabled")
 	thinkingInjectionPromptSet := hasNestedSettingsKey(req, "thinking_injection", "prompt")
+	sensitiveWordsSet := hasNestedSettingsKey(req, "sensitive_words", "enabled") || hasNestedSettingsKey(req, "sensitive_words", "patterns") || hasNestedSettingsKey(req, "sensitive_words", "block_message")
 
 	if err := h.Store.Update(func(c *config.Config) error {
 		if adminCfg != nil {
@@ -82,12 +84,41 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		if aliasMap != nil {
 			c.ModelAliases = aliasMap
 		}
+		if sensitiveWordsSet {
+			if raw, ok := req["sensitive_words"].(map[string]any); ok {
+				if v, exists := raw["enabled"]; exists {
+					c.SensitiveWords.Enabled = boolFrom(v)
+				}
+				if v, exists := raw["patterns"]; exists {
+					if patterns, ok := v.([]any); ok {
+						c.SensitiveWords.Patterns = make([]string, 0, len(patterns))
+						for _, p := range patterns {
+							if s, ok := p.(string); ok {
+								c.SensitiveWords.Patterns = append(c.SensitiveWords.Patterns, s)
+							}
+						}
+					}
+				}
+				if v, exists := raw["block_message"]; exists {
+					c.SensitiveWords.BlockMessage = strings.TrimSpace(fmt.Sprintf("%v", v))
+				}
+				if err := config.ValidateSensitiveWordsConfig(c.SensitiveWords); err != nil {
+					return err
+				}
+			}
+		}
 		return nil
 	}); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": err.Error()})
 		return
 	}
 
+	if sensitiveWordsSet {
+		snap := h.Store.Snapshot()
+		if err := h.SensitiveWordsMatcher.Update(snap.SensitiveWords); err != nil {
+			config.Logger.Warn("[sensitive_words] 更新匹配器失败", "error", err)
+		}
+	}
 	h.applyRuntimeSettings()
 	needsSync := config.IsVercel() || h.Store.IsEnvBacked()
 	writeJSON(w, http.StatusOK, map[string]any{

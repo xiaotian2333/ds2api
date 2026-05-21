@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -173,4 +174,30 @@ func (s *Store) ThinkingInjectionPrompt() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return strings.TrimSpace(s.cfg.ThinkingInjection.Prompt)
+}
+
+func (s *Store) SensitiveWordsConfig() SensitiveWordsConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return SensitiveWordsConfig{
+		Enabled:      s.cfg.SensitiveWords.Enabled,
+		Patterns:     slices.Clone(s.cfg.SensitiveWords.Patterns),
+		BlockMessage: strings.TrimSpace(s.cfg.SensitiveWords.BlockMessage),
+	}
+}
+
+func (s *Store) SensitiveWordsEnabled() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cfg.SensitiveWords.Enabled
+}
+
+func (s *Store) SensitiveWordsBlockMessage() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	msg := strings.TrimSpace(s.cfg.SensitiveWords.BlockMessage)
+	if msg == "" {
+		return "请求被拦截：输入包含敏感词"
+	}
+	return msg
 }

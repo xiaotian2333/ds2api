@@ -13,10 +13,12 @@ import (
 	"ds2api/internal/assistantturn"
 	"ds2api/internal/auth"
 	"ds2api/internal/completionruntime"
+	"ds2api/internal/config"
 	dsprotocol "ds2api/internal/deepseek/protocol"
 	openaifmt "ds2api/internal/format/openai"
 	"ds2api/internal/promptcompat"
 	"ds2api/internal/responsehistory"
+	"ds2api/internal/sensitivewords"
 	"ds2api/internal/sse"
 	streamengine "ds2api/internal/stream"
 )
@@ -74,6 +76,11 @@ func (h *Handler) Responses(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeOpenAIError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if matched, pattern := h.checkSensitiveWords(req); matched {
+		config.Logger.Warn("[sensitive_words] 拦截 Responses 请求", "pattern", pattern, "trace", requestTraceID(r))
+		writeOpenAIError(w, 422, h.Store.SensitiveWordsBlockMessage())
 		return
 	}
 	if err := h.preprocessInlineFileInputs(r.Context(), a, req); err != nil {
@@ -223,4 +230,17 @@ func (h *Handler) handleResponsesStream(w http.ResponseWriter, r *http.Request, 
 			streamRuntime.finalize("stop", false)
 		},
 	})
+}
+
+func (h *Handler) checkSensitiveWords(req map[string]any) (matched bool, pattern string) {
+	if h.SensitiveWordsMatcher == nil || !h.Store.SensitiveWordsEnabled() {
+		return false, ""
+	}
+	texts := sensitivewords.ExtractTextFromRequest(req)
+	for _, text := range texts {
+		if ok, p := h.SensitiveWordsMatcher.Check(text); ok {
+			return true, p
+		}
+	}
+	return false, ""
 }

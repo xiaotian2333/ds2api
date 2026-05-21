@@ -68,5 +68,14 @@
   },
   "auto_delete": {
     "mode": "none"
+  },
+  "sensitive_words": {
+    "_comment": "输入敏感词拦截，使用正则匹配，默认关闭",
+    "enabled": false,
+    "patterns": [
+      "example-bad-word",
+      "攻击\\w*"
+    ],
+    "block_message": "请求被拦截：输入包含敏感词"
   }
 }

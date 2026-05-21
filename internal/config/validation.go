@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -25,6 +26,9 @@ func ValidateConfig(c Config) error {
 		return err
 	}
 	if err := ValidateCurrentInputFileConfig(c.CurrentInputFile); err != nil {
+		return err
+	}
+	if err := ValidateSensitiveWordsConfig(c.SensitiveWords); err != nil {
 		return err
 	}
 	if err := ValidateAccountProxyReferences(c.Accounts, c.Proxies); err != nil {
@@ -150,4 +154,17 @@ func ValidateAutoDeleteMode(mode string) error {
 	default:
 		return fmt.Errorf("auto_delete.mode must be one of none, single, all")
 	}
+}
+
+func ValidateSensitiveWordsConfig(cfg SensitiveWordsConfig) error {
+	for i, raw := range cfg.Patterns {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return fmt.Errorf("sensitive_words.patterns[%d] 不能为空", i)
+		}
+		if _, err := regexp.Compile(raw); err != nil {
+			return fmt.Errorf("sensitive_words.patterns[%d] 正则编译失败 %q: %w", i, raw, err)
+		}
+	}
+	return nil
 }

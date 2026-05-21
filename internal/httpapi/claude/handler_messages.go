@@ -20,6 +20,7 @@ import (
 	"ds2api/internal/httpapi/requestbody"
 	"ds2api/internal/promptcompat"
 	"ds2api/internal/responsehistory"
+	"ds2api/internal/sensitivewords"
 	streamengine "ds2api/internal/stream"
 	"ds2api/internal/translatorcliproxy"
 	"ds2api/internal/util"
@@ -68,6 +69,11 @@ func (h *Handler) handleClaudeDirect(w http.ResponseWriter, r *http.Request) boo
 	var req map[string]any
 	if err := json.Unmarshal(raw, &req); err != nil {
 		writeClaudeError(w, http.StatusBadRequest, "invalid json")
+		return true
+	}
+	if matched, pattern := h.checkSensitiveWords(req); matched {
+		config.Logger.Warn("[sensitive_words] 拦截 Claude 请求", "pattern", pattern)
+		writeClaudeError(w, 422, h.Store.SensitiveWordsBlockMessage())
 		return true
 	}
 	norm, err := normalizeClaudeRequest(h.Store, req)
@@ -357,4 +363,17 @@ func (h *Handler) handleClaudeStreamRealtime(w http.ResponseWriter, r *http.Requ
 		OnParsed:   streamRuntime.onParsed,
 		OnFinalize: streamRuntime.onFinalize,
 	})
+}
+
+func (h *Handler) checkSensitiveWords(req map[string]any) (matched bool, pattern string) {
+	if h.SensitiveWordsMatcher == nil || !h.Store.SensitiveWordsEnabled() {
+		return false, ""
+	}
+	texts := sensitivewords.ExtractTextFromRequest(req)
+	for _, text := range texts {
+		if ok, p := h.SensitiveWordsMatcher.Check(text); ok {
+			return true, p
+		}
+	}
+	return false, ""
 }

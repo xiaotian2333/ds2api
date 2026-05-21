@@ -23,6 +23,10 @@ type testGeminiConfig struct{}
 func (testGeminiConfig) ModelAliases() map[string]string { return nil }
 func (testGeminiConfig) CurrentInputFileEnabled() bool   { return true }
 func (testGeminiConfig) CurrentInputFileMinChars() int   { return 0 }
+func (testGeminiConfig) SensitiveWordsEnabled() bool     { return false }
+func (testGeminiConfig) SensitiveWordsBlockMessage() string {
+	return "请求被拦截：输入包含敏感词"
+}
 
 type testGeminiAuth struct {
 	a   *auth.RequestAuth
