@@ -130,6 +130,8 @@
         "reauthRequired": "需重新测试状态",
         "runtimeStatusUnknown": "状态以同步后为准",
         "testStatusFailed": "上次测试失败",
+        "isMuted": "已禁言",
+        "mutedUntil": "禁言至 {time}",
         "noAccounts": "未找到任何账号",
         "modalAddKeyTitle": "添加 API 密钥",
         "modalEditKeyTitle": "编辑 API 密钥",

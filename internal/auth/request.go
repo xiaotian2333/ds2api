@@ -21,7 +21,11 @@ const authCtxKey ctxKey = "auth_context"
 var (
 	ErrUnauthorized = errors.New("unauthorized: missing auth token")
 	ErrNoAccount    = errors.New("no accounts configured or all accounts are busy")
+	ErrAccountMuted = errors.New("account is muted")
 )
+
+// MuteCheckFunc 检查账号禁言状态的函数签名
+type MuteCheckFunc func(ctx context.Context, token string) (*config.MuteInfo, error)
 
 type RequestAuth struct {
 	UseConfigToken bool
@@ -36,9 +40,10 @@ type RequestAuth struct {
 type LoginFunc func(ctx context.Context, acc config.Account) (string, error)
 
 type Resolver struct {
-	Store *config.Store
-	Pool  *account.Pool
-	Login LoginFunc
+	Store    *config.Store
+	Pool     *account.Pool
+	Login    LoginFunc
+	CheckMute MuteCheckFunc
 
 	mu               sync.Mutex
 	tokenRefreshedAt map[string]time.Time
@@ -155,7 +160,30 @@ func (r *Resolver) loginAndPersist(ctx context.Context, a *RequestAuth) error {
 	a.Account.Token = token
 	a.DeepSeekToken = token
 	r.markTokenRefreshedNow(a.AccountID)
-	return r.Store.UpdateAccountToken(a.AccountID, token)
+	if err := r.Store.UpdateAccountToken(a.AccountID, token); err != nil {
+		return err
+	}
+	// 登录成功后检查禁言状态
+	return r.checkMuteAfterToken(ctx, a)
+}
+
+func (r *Resolver) checkMuteAfterToken(ctx context.Context, a *RequestAuth) error {
+	if r.CheckMute == nil || !a.UseConfigToken || a.AccountID == "" {
+		return nil
+	}
+	info, err := r.CheckMute(ctx, a.DeepSeekToken)
+	if err != nil {
+		config.Logger.Warn("[mute_check] query failed", "account", a.AccountID, "error", err)
+		return nil // 查询失败不阻塞登录
+	}
+	if info != nil {
+		_ = r.Store.UpdateAccountMuteStatus(a.AccountID, info)
+		if info.Muted {
+			config.Logger.Warn("[mute_check] account is muted", "account", a.AccountID, "mute_until", info.MuteUntil)
+			return ErrAccountMuted
+		}
+	}
+	return nil
 }
 
 func (r *Resolver) RefreshToken(ctx context.Context, a *RequestAuth) bool {
@@ -166,6 +194,9 @@ func (r *Resolver) RefreshToken(ctx context.Context, a *RequestAuth) bool {
 	a.Account.Token = ""
 	if err := r.loginAndPersist(ctx, a); err != nil {
 		config.Logger.Error("[refresh_token] failed", "account", a.AccountID, "error", err)
+		if errors.Is(err, ErrAccountMuted) {
+			config.Logger.Warn("[refresh_token] account is muted, keeping token cleared", "account", a.AccountID)
+		}
 		return false
 	}
 	return true
@@ -179,6 +210,7 @@ func (r *Resolver) MarkTokenInvalid(a *RequestAuth) {
 	a.DeepSeekToken = ""
 	r.clearTokenRefreshMark(a.AccountID)
 	_ = r.Store.UpdateAccountToken(a.AccountID, "")
+	r.Store.ClearAccountMuteStatus(a.AccountID)
 }
 
 func (r *Resolver) SwitchAccount(ctx context.Context, a *RequestAuth) bool {
@@ -251,6 +283,10 @@ func (r *Resolver) ensureManagedToken(ctx context.Context, a *RequestAuth) error
 	if strings.TrimSpace(a.Account.Token) == "" {
 		return r.loginAndPersist(ctx, a)
 	}
+	// 如果账号已被标记为禁言，直接返回错误
+	if info, ok := r.Store.AccountMuteStatus(a.AccountID); ok && info != nil && info.Muted {
+		return ErrAccountMuted
+	}
 	if r.shouldForceRefresh(a.AccountID) {
 		if err := r.loginAndPersist(ctx, a); err != nil {
 			return err
@@ -258,6 +294,29 @@ func (r *Resolver) ensureManagedToken(ctx context.Context, a *RequestAuth) error
 		return nil
 	}
 	a.DeepSeekToken = a.Account.Token
+	// 非强制刷新时也定期检查禁言状态（使用 token 刷新间隔的一半）
+	intervalHours := r.Store.RuntimeTokenRefreshIntervalHours()
+	if intervalHours > 0 {
+		checkInterval := time.Duration(intervalHours/2) * time.Hour
+		if checkInterval < time.Hour {
+			checkInterval = time.Hour
+		}
+		now := time.Now()
+		r.mu.Lock()
+		last, ok := r.tokenRefreshedAt[a.AccountID]
+		if !ok || last.IsZero() {
+			r.tokenRefreshedAt[a.AccountID] = now
+			r.mu.Unlock()
+		} else {
+			r.mu.Unlock()
+			if now.Sub(last) >= checkInterval {
+				if err := r.checkMuteAfterToken(ctx, a); err != nil {
+					return err
+				}
+				r.markTokenRefreshedNow(a.AccountID)
+			}
+		}
+	}
 	return nil
 }
 

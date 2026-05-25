@@ -52,6 +52,9 @@ func NewApp() (*App, error) {
 		return dsClient.Login(ctx, acc)
 	})
 	dsClient = dsclient.NewClient(store, resolver)
+	resolver.CheckMute = func(ctx context.Context, token string) (*config.MuteInfo, error) {
+		return dsClient.GetMuteStatus(ctx, token)
+	}
 	if err := dsClient.PreloadPow(context.Background()); err != nil {
 		config.Logger.Warn("[PoW] init failed", "error", err)
 	} else {

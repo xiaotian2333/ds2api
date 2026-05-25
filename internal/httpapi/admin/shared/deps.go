@@ -18,6 +18,9 @@ type ConfigStore interface {
 	UpdateAccountToken(identifier, token string) error
 	UpdateAccountTestStatus(identifier, status string) error
 	AccountTestStatus(identifier string) (string, bool)
+	UpdateAccountMuteStatus(identifier string, info *config.MuteInfo) error
+	AccountMuteStatus(identifier string) (*config.MuteInfo, bool)
+	ClearAccountMuteStatus(identifier string)
 	Update(mutator func(*config.Config) error) error
 	ExportJSONAndBase64() (string, string, error)
 	IsEnvBacked() bool

@@ -130,6 +130,8 @@
         "reauthRequired": "Retest status required",
         "runtimeStatusUnknown": "Will be determined after sync",
         "testStatusFailed": "Last test failed",
+        "isMuted": "Muted",
+        "mutedUntil": "Muted until {time}",
         "noAccounts": "No accounts found.",
         "modalAddKeyTitle": "Add API key",
         "modalEditKeyTitle": "Edit API key",

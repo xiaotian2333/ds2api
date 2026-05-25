@@ -75,6 +75,15 @@ func (c *Client) CreateSession(ctx context.Context, a *auth.RequestAuth, maxAtte
 		config.Logger.Warn("[create_session] failed", "status", status, "code", code, "biz_code", bizCode, "msg", msg, "biz_msg", bizMsg, "use_config_token", a.UseConfigToken, "account", a.AccountID)
 		if a.UseConfigToken {
 			if !refreshed && shouldAttemptRefresh(status, code, bizCode, msg, bizMsg) {
+				// 对话失败时检查禁言状态
+				if isAuthFailure(status, code, bizCode, msg, bizMsg) {
+					if muteInfo, muteErr := c.GetMuteStatus(ctx, a.DeepSeekToken); muteErr == nil && muteInfo != nil && muteInfo.Muted {
+						config.Logger.Warn("[create_session] account is muted", "account", a.AccountID, "mute_until", muteInfo.MuteUntil)
+						_ = c.Store.UpdateAccountMuteStatus(a.AccountID, muteInfo)
+						attempts++
+						continue
+					}
+				}
 				if c.Auth.RefreshToken(ctx, a) {
 					refreshed = true
 					continue
@@ -89,6 +98,34 @@ func (c *Client) CreateSession(ctx context.Context, a *auth.RequestAuth, maxAtte
 		attempts++
 	}
 	return "", errors.New("create session failed")
+}
+
+// isAuthFailure 判断错误是否属于认证/授权类错误，可能是禁言导致的
+func isAuthFailure(status int, code int, bizCode int, msg string, bizMsg string) bool {
+	if isTokenInvalid(status, code, bizCode, msg, bizMsg) {
+		return true
+	}
+	// 某些禁言错误可能以 HTTP 403 返回
+	if status == http.StatusForbidden {
+		return true
+	}
+	combined := strings.ToLower(strings.TrimSpace(msg) + " " + strings.TrimSpace(bizMsg))
+	// 检查是否包含限流/禁言相关关键词
+	muteKeywords := []string{
+		"mute",
+		"muted",
+		"rate limit",
+		"too many",
+		"restricted",
+		"banned",
+		"blocked",
+	}
+	for _, kw := range muteKeywords {
+		if strings.Contains(combined, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Client) GetPow(ctx context.Context, a *auth.RequestAuth, maxAttempts int) (string, error) {

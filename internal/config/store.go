@@ -10,6 +10,11 @@ import (
 	"sync"
 )
 
+type MuteInfo struct {
+	Muted     bool
+	MuteUntil int64
+}
+
 type Store struct {
 	mu      sync.RWMutex
 	cfg     Config
@@ -18,6 +23,7 @@ type Store struct {
 	keyMap  map[string]struct{} // O(1) API key lookup index
 	accMap  map[string]int      // O(1) account lookup: identifier -> slice index
 	accTest map[string]string   // runtime-only account test status cache
+	accMute map[string]*MuteInfo // runtime-only account mute status cache
 }
 
 func LoadStore() *Store {
@@ -193,6 +199,56 @@ func (s *Store) AccountTestStatus(identifier string) (string, bool) {
 	defer s.mu.RUnlock()
 	status, ok := s.accTest[identifier]
 	return status, ok
+}
+
+func (s *Store) UpdateAccountMuteStatus(identifier string, info *MuteInfo) error {
+	identifier = strings.TrimSpace(identifier)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx, ok := s.findAccountIndexLocked(identifier)
+	if !ok {
+		return errors.New("account not found")
+	}
+	s.setAccountMuteStatusLocked(s.cfg.Accounts[idx], info, identifier)
+	return nil
+}
+
+func (s *Store) AccountMuteStatus(identifier string) (*MuteInfo, bool) {
+	identifier = strings.TrimSpace(identifier)
+	if identifier == "" {
+		return nil, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	info, ok := s.accMute[identifier]
+	if !ok {
+		return nil, false
+	}
+	return info, true
+}
+
+func (s *Store) ClearAccountMuteStatus(identifier string) {
+	identifier = strings.TrimSpace(identifier)
+	if identifier == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx, ok := s.findAccountIndexLocked(identifier)
+	if !ok {
+		return
+	}
+	acc := s.cfg.Accounts[idx]
+	if id := acc.Identifier(); id != "" {
+		delete(s.accMute, id)
+	}
+	if email := acc.Email; email != "" {
+		delete(s.accMute, email)
+	}
+	if mobile := CanonicalMobileKey(acc.Mobile); mobile != "" {
+		delete(s.accMute, mobile)
+	}
+	delete(s.accMute, identifier)
 }
 
 func (s *Store) UpdateAccountToken(identifier, token string) error {
