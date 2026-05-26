@@ -75,7 +75,7 @@ func MessagesPrepareWithThinking(messages []map[string]any, _ bool) string {
 		}
 	}
 	if lastRole != "assistant" {
-		parts = append(parts, assistantMarker)
+		parts = append(parts, "\n"+assistantMarker)
 	}
 	out := strings.Join(parts, "")
 	return markdownImagePattern.ReplaceAllString(out, `[${1}](${2})`)
@@ -85,7 +85,7 @@ func MessagesPrepareWithThinking(messages []map[string]any, _ bool) string {
 // No whitespace is inserted between marker and text so role boundaries stay
 // compact and predictable for downstream parsers.
 func formatRoleBlock(marker, text, endMarker string) string {
-	out := marker + text
+	out := "\n" + marker + text
 	if strings.TrimSpace(endMarker) != "" {
 		out += endMarker
 	}
